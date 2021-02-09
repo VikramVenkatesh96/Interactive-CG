@@ -51,6 +51,7 @@ artifacts/
 *.ilk
 *.meta
 *.obj
+!CS6610\Assets\Models\*.obj
 *.pch
 *.pdb
 *.pgc
