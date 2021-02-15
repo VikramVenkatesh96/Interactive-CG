@@ -27,7 +27,7 @@ bool Window::CreateNewWindow()
 	}
 	glfwMakeContextCurrent(glWindow);
 	glfwSetKeyCallback(glWindow,key_callback);
-
+	glewInit();
 	return true;
 }
 

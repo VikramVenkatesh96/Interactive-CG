@@ -1,11 +1,85 @@
 #include "Application.h"
-#include <GLFW/glfw3.h>
+#include "Importer.h"
+#include "Mouse.h"
 #include <assert.h>
-//void err_callback(int error, const char* description)
-//{
-//	std::cout << "Error :" << description;
-//}
 
+//Frametime counter(1/FPS)
+double frameTime;
+//Mesh and shader declaration
+Mesh3D* mesh = nullptr;
+Shader* shader = nullptr;
+Camera* camera = nullptr;
+
+static void CustomMouseCursorCallback(GLFWwindow* window, double xPos, double yPos)
+{
+	static double lastXPos, lastYPos;
+	
+	if (Mouse::isFirstClickRMB())
+	{
+		lastXPos = xPos;
+		lastYPos = yPos;
+	}
+	if (Mouse::isDraggingRMB())
+	{
+		float delta_x = (float)(lastXPos - xPos) * Mouse::GetSensitivity();
+		float delta_y = (float)(lastYPos- yPos) * Mouse::GetSensitivity();
+		camera->yawCamera(delta_x);
+		camera->pitchCamera(delta_y);
+		lastXPos = xPos;
+		lastYPos = yPos;
+	}
+	if (Mouse::isDraggingLMB())
+	{
+		float delta_x = (float)(lastXPos - xPos) * Mouse::GetSensitivity();
+		float delta_y = (float)(lastYPos - yPos) * Mouse::GetSensitivity();
+
+		lastXPos = xPos;
+		lastYPos = yPos;
+	}
+}
+
+static void ScrollCallback(GLFWwindow* window, double xOffset, double yOffset)
+{
+
+	if (Mouse::isDraggingRMB())
+	{
+		static constexpr float speedFactor = 2.0f;
+		camera->SetSpeed(camera->GetSpeed() * ((yOffset > 0) ? speedFactor : 1.0f / speedFactor));
+	}
+	else
+	{
+		camera->Translate(((yOffset > 0) ? Camera::Direction::FORWARD : Camera::Direction::BACKWARD),
+			(float)frameTime);
+	}
+}
+
+static void CustomKeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods)
+{
+	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+	{
+		glfwSetWindowShouldClose(window, GLFW_TRUE);
+	}
+}
+
+static void HandleKeyboardInput(GLFWwindow* window)
+{
+	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+	{
+		camera->Translate(Camera::Direction::FORWARD, (float)frameTime);
+	}
+	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+	{
+		camera->Translate(Camera::Direction::LEFT, (float)frameTime);
+	}
+	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+	{
+		camera->Translate(Camera::Direction::BACKWARD, (float)frameTime);
+	}
+	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+	{
+		camera->Translate(Camera::Direction::RIGHT, (float)frameTime);
+	}
+}
 
 void Application::Init()
 {
@@ -19,6 +93,16 @@ void Application::Init()
 		glfwTerminate();
 		exit(-1);
 	}
+
+	glfwSetMouseButtonCallback(window.GetGLWindow(), Mouse::MouseButtonCallback);
+	glfwSetCursorPosCallback(window.GetGLWindow(), CustomMouseCursorCallback);
+	glfwSetScrollCallback(window.GetGLWindow(), ScrollCallback);
+	glfwSetKeyCallback(window.GetGLWindow(), CustomKeyCallback);
+	camera = new Camera(glm::vec3(0.0f ,0.0f ,-5.0f), 70.0f, window.GetAspectRatio(), 0.01f, 1000.0f);
+	mesh = Importer::Mesh::ImportByFileName("teapot.obj");
+	mesh->GetTransform().SetScale(glm::vec3(0.05f));
+	shader = new Shader("Standard.glsl", "Standard.glsl");
+	
 #ifdef _WIN64
 	m_core.Init(&window);
 	vkGetDeviceQueue(m_core.GetDevice(), m_core.GetQueueFamily(), 0, &m_queue);
@@ -30,8 +114,15 @@ void Application::Init()
 
 void Application::Update()
 {
+	printf("Hit F6 to hot-reload shaders\n");
+	
+	double prevTime = glfwGetTime();
 	while (!window.ShouldWindowClose())
 	{
+		static double timer = 0.0f;
+		double currentTime = glfwGetTime();
+
+		HandleKeyboardInput(window.GetGLWindow());
 #ifdef _WIN64
 		uint32_t imageIndex = 0;
 		vkAcquireNextImageKHR(m_core.GetDevice(), m_swapChain, UINT64_MAX, NULL, NULL, &imageIndex);
@@ -52,11 +143,29 @@ void Application::Update()
 		//Prepare command buffer for next images
 		RecordCommandBuffers();
 #else
-
 		glClear(GL_COLOR_BUFFER_BIT);
-		glClearColor(fabs(sinf(glfwGetTime())), 0.0f, 0.0f, 1.0f);
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		//Update mesh
+		mesh->GetTransform().SetRot(glm::vec3(glm::radians(-90.0f) , currentTime, 0.0f));
+		shader->Update(mesh->GetTransform(), *camera);
+		mesh->Draw(shader);
 #endif // _WIN64
 		window.UpdateWindow();
+		
+		if (glfwGetKey(window.GetGLWindow(), GLFW_KEY_F6))
+		{
+			//Mechanism to lock reloading shaders for some time.
+			//Have to wait atleast 1 sec before you can press F6 again.
+			if (timer > 1.0f)
+			{
+				shader->Hot_Reload("Standard.glsl", "Standard.glsl");
+				printf("Recompiled Shaders!\n");
+				timer = 0;
+			}
+		}
+		frameTime = currentTime - prevTime;
+		timer += frameTime;
+		prevTime = currentTime;
 	}
 }
 
@@ -67,6 +176,9 @@ void Application::Cleanup()
 	vkDestroyCommandPool(m_core.GetDevice(), m_cmdBufPool, NULL);
 	vkDestroySwapchainKHR(m_core.GetDevice(),m_swapChain,NULL);
 #endif
+	delete mesh;
+	delete shader;
+	delete camera;
 	window.DestroyWindow();
 	glfwTerminate();
 }
